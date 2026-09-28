@@ -48,13 +48,15 @@ export const Hero = ({ movie }: HeroProps) => {
           </p>
           
           <div className="flex flex-wrap items-center gap-4">
-            <Link
-              to={`/movie/${movie.id}`}
-              className="flex items-center gap-2 bg-primary hover:bg-primary-hover text-white px-8 py-3 rounded-full font-semibold transition-all hover:scale-105 active:scale-95"
+            <a
+              href={`https://www.youtube.com/results?search_query=${encodeURIComponent(`${movie.title} official trailer`)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 bg-[#ff0000] hover:bg-[#cc0000] text-white px-8 py-3 rounded-full font-semibold transition-all hover:scale-105 active:scale-95 shadow-lg shadow-red-600/30"
             >
               <Play className="w-5 h-5 fill-current" />
               Watch Trailer
-            </Link>
+            </a>
             
             <Link
               to={`/movie/${movie.id}`}

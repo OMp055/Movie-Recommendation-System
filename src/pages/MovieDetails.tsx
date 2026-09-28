@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Star, Clock, Calendar, Heart, Play, X } from 'lucide-react';
-import { getMovieDetails, getSimilarMovies } from '../api/tmdb';
+import { motion } from 'framer-motion';
+import { Star, Clock, Calendar, Heart, Play, Download } from 'lucide-react';
+import { getMovieDetails, getMovieCandidates } from '../api/tmdb';
 import { getRecommendations } from '../utils/recommendation';
 import { MovieList } from '../components/MovieList';
 import type { MovieDetails as MovieDetailsType, Movie } from '../types';
@@ -10,11 +10,9 @@ import type { MovieDetails as MovieDetailsType, Movie } from '../types';
 export const MovieDetails = () => {
   const { id } = useParams<{ id: string }>();
   const [movie, setMovie] = useState<MovieDetailsType | null>(null);
-  const [similar, setSimilar] = useState<Movie[]>([]);
   const [contentBasedRecs, setContentBasedRecs] = useState<Movie[]>([]);
   const [favorites, setFavorites] = useState<Movie[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showTrailer, setShowTrailer] = useState(false);
 
   useEffect(() => {
     const savedFavs = localStorage.getItem('cinepulse_favorites');
@@ -30,12 +28,13 @@ export const MovieDetails = () => {
       window.scrollTo(0, 0);
       try {
         const details = await getMovieDetails(id);
-        const similarMovies = await getSimilarMovies(id);
         setMovie(details);
-        setSimilar(similarMovies);
+
+        // Fetch smart candidate pool (recommendations, similar, and genre discover)
+        const candidates = await getMovieCandidates(details);
         
-        // Simple content based recs using similar movies corpus for speed
-        const recs = getRecommendations(details, similarMovies, 10);
+        // Accurate AI content-based similarity
+        const recs = getRecommendations(details, candidates, 12);
         setContentBasedRecs(recs);
       } catch (error) {
         console.error('Error fetching movie details:', error);
@@ -69,7 +68,20 @@ export const MovieDetails = () => {
     );
   }
 
-  const trailer = movie.videos?.results.find(v => v.type === 'Trailer' && v.site === 'YouTube');
+  // Find trailer, teaser or any video from YouTube
+  const trailer = movie.videos?.results.find(v => v.type === 'Trailer' && v.site === 'YouTube')
+    || movie.videos?.results.find(v => v.type === 'Teaser' && v.site === 'YouTube')
+    || movie.videos?.results.find(v => v.site === 'YouTube');
+
+  // Dynamic YouTube trailer link: direct video URL if available, else query search
+  const youtubeUrl = trailer?.key
+    ? `https://www.youtube.com/watch?v=${trailer.key}`
+    : `https://www.youtube.com/results?search_query=${encodeURIComponent(`${movie.title} official trailer`)}`;
+
+  // Dynamic Download link
+  const formattedTitle = movie.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  const downloadUrl = `https://bollyflix.af/${formattedTitle}/`;
+
   const isFavorite = favorites.some(f => f.id === movie.id);
 
   return (
@@ -144,15 +156,26 @@ export const MovieDetails = () => {
             </div>
 
             <div className="flex flex-wrap items-center gap-4">
-              {trailer && (
-                <button
-                  onClick={() => setShowTrailer(true)}
-                  className="flex items-center gap-2 bg-primary hover:bg-primary-hover text-white px-8 py-3 rounded-full font-semibold transition-all hover:scale-105 active:scale-95"
-                >
-                  <Play className="w-5 h-5 fill-current" />
-                  Watch Trailer
-                </button>
-              )}
+              <a
+                href={youtubeUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 bg-[#ff0000] hover:bg-[#cc0000] text-white px-8 py-3 rounded-full font-semibold transition-all hover:scale-105 active:scale-95 shadow-lg shadow-red-600/30"
+              >
+                <Play className="w-5 h-5 fill-current" />
+                Watch Trailer
+              </a>
+
+              <a
+                href={downloadUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-full font-semibold transition-all hover:scale-105 active:scale-95 shadow-lg shadow-blue-600/30"
+              >
+                <Download className="w-5 h-5" />
+                Download Movie
+              </a>
+
               <button
                 onClick={() => handleToggleFavorite(movie)}
                 className={`flex items-center gap-2 px-8 py-3 rounded-full font-semibold transition-all hover:scale-105 active:scale-95 glass ${
@@ -204,43 +227,8 @@ export const MovieDetails = () => {
               onToggleFavorite={handleToggleFavorite}
             />
           )}
-          
-          <MovieList
-            title="Similar Movies"
-            movies={similar}
-            favorites={favorites}
-            onToggleFavorite={handleToggleFavorite}
-          />
         </div>
       </div>
-
-      {/* Trailer Modal */}
-      <AnimatePresence>
-        {showTrailer && trailer && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm"
-          >
-            <div className="w-full max-w-5xl aspect-video relative rounded-2xl overflow-hidden glass shadow-2xl">
-              <button
-                onClick={() => setShowTrailer(false)}
-                className="absolute -top-12 right-0 md:top-4 md:right-4 z-10 p-2 glass rounded-full text-white hover:text-primary transition-colors"
-              >
-                <X className="w-6 h-6" />
-              </button>
-              <iframe
-                src={`https://www.youtube.com/embed/${trailer.key}?autoplay=1`}
-                title="Trailer"
-                className="w-full h-full border-0"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                allowFullScreen
-              ></iframe>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 };

@@ -9,6 +9,7 @@ export interface Movie {
   vote_count: number;
   genre_ids: number[];
   popularity: number;
+  original_language?: string;
 }
 
 export interface MovieDetails extends Movie {

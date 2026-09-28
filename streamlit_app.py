@@ -2,13 +2,14 @@ import streamlit as st
 import httpx
 import os
 import re
+import urllib.parse
 from dotenv import load_dotenv
 from recommendation import get_recommendations, get_hybrid_recommendations
 
 # Load TMDB API Key
 load_dotenv(dotenv_path=".env")
 API_KEY = os.getenv("VITE_TMDB_API_KEY")
-BASE_URL = "https://api.themoviedb.org/3"
+BASE_URL = "https://api.tmdb.org/3"
 
 st.set_page_config(page_title="CinePulse (Python Edition)", layout="wide", page_icon="🎬")
 
@@ -44,8 +45,11 @@ def fetch_tmdb(endpoint: str, params: dict = None):
     url = f"{BASE_URL}{endpoint}"
     query = {"api_key": API_KEY}
     if params: query.update(params)
-    response = httpx.get(url, params=query)
-    return response.json()
+    try:
+        response = httpx.get(url, params=query, timeout=10.0)
+        return response.json()
+    except Exception as e:
+        return {}
 
 def search_movies(q: str):
     data = fetch_tmdb("/search/movie", {"query": q})
@@ -59,13 +63,30 @@ def search_movies(q: str):
     return results
 
 @st.cache_data(ttl=3600)
-def fetch_corpus():
-    corpus = []
+def fetch_corpus(liked_movie_ids_tuple=()):
+    candidates = {}
+    
+    # Fetch targeted candidates for liked movies
+    for mid in liked_movie_ids_tuple:
+        recs = fetch_tmdb(f"/movie/{mid}/recommendations").get("results", [])
+        for m in recs:
+            if m.get("id") and m.get("poster_path"):
+                candidates[m["id"]] = m
+        sim = fetch_tmdb(f"/movie/{mid}/similar").get("results", [])
+        for m in sim:
+            if m.get("id") and m.get("poster_path") and (m.get("vote_count", 0) >= 10):
+                candidates[m["id"]] = m
+
+    # Also include popular & top-rated for diversity
     for page in [1, 2]:
-        corpus.extend(fetch_tmdb("/movie/popular", {"page": page}).get("results", []))
-        corpus.extend(fetch_tmdb("/movie/top_rated", {"page": page}).get("results", []))
-    # Deduplicate
-    return list({m["id"]: m for m in corpus}.values())
+        for m in fetch_tmdb("/movie/popular", {"page": page}).get("results", []):
+            if m.get("id") and m.get("poster_path"):
+                candidates[m["id"]] = m
+        for m in fetch_tmdb("/movie/top_rated", {"page": page}).get("results", []):
+            if m.get("id") and m.get("poster_path"):
+                candidates[m["id"]] = m
+                
+    return list(candidates.values())
 
 # ---------------------------------------------------------
 # UI Components
@@ -81,11 +102,16 @@ def display_movie_grid(movies):
             poster = movie.get('poster_path')
             img_url = f"https://image.tmdb.org/t/p/w500{poster}" if poster else "https://via.placeholder.com/500x750?text=No+Poster"
             
+            title = movie.get('title', 'Unknown')
+            yt_query = urllib.parse.quote(f"{title} official trailer")
+            yt_link = f"https://www.youtube.com/results?search_query={yt_query}"
+
             st.markdown(f"""
             <div class="movie-card">
                 <img src="{img_url}" width="100%">
-                <h4 style="margin-top:10px; font-size:16px;">{movie.get('title')}</h4>
+                <h4 style="margin-top:10px; font-size:16px;">{title}</h4>
                 <p style="color:gray; font-size:12px;">★ {movie.get('vote_average', 0)}/10</p>
+                <a href="{yt_link}" target="_blank" style="display:inline-block; margin-top:6px; margin-bottom:10px; padding:6px 14px; background:#ff0000; color:white; border-radius:20px; text-decoration:none; font-size:12px; font-weight:bold;">▶ Watch Trailer</a>
             </div>
             """, unsafe_allow_html=True)
             
@@ -140,7 +166,8 @@ elif page == "My Recommendations":
         st.warning("Like some movies first to get personalized recommendations!")
     else:
         with st.spinner("Analyzing your taste and generating recommendations..."):
-            corpus = fetch_corpus()
+            fav_ids = tuple(f['id'] for f in st.session_state.favorites if f.get('id'))
+            corpus = fetch_corpus(fav_ids)
             # Use the Python recommendation engine we built!
             hybrid_recs = get_hybrid_recommendations(st.session_state.favorites, corpus, top_n=10)
             display_movie_grid(hybrid_recs)

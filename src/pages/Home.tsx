@@ -48,8 +48,8 @@ export const Home = () => {
     const fetchRecommendations = async () => {
       if (favorites.length > 0) {
         try {
-          const corpus = await fetchAllForRecommendations();
-          const recs = getHybridRecommendations(favorites, corpus, 10);
+          const corpus = await fetchAllForRecommendations(favorites);
+          const recs = getHybridRecommendations(favorites, corpus, 12);
           setRecommendations(recs);
         } catch (error) {
           console.error('Failed to fetch corpus for recommendations:', error);

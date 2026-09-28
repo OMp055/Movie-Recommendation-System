@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Star, Heart } from 'lucide-react';
+import { Star, Heart, Play } from 'lucide-react';
 import type { Movie } from '../types';
 import { useState } from 'react';
 
@@ -51,6 +51,19 @@ export const MovieCard = ({ movie, isFavorite = false, onToggleFavorite }: Movie
         </div>
       </Link>
       
+      {/* Dynamic YouTube Trailer Link */}
+      <a
+        href={`https://www.youtube.com/results?search_query=${encodeURIComponent(`${movie.title} official trailer`)}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={(e) => e.stopPropagation()}
+        className="absolute top-3 left-3 p-1.5 px-2.5 rounded-full glass bg-black/60 text-white hover:bg-[#ff0000] hover:text-white transition-all z-10 flex items-center gap-1 text-xs font-semibold opacity-0 group-hover:opacity-100 shadow-lg"
+        title="Watch Trailer on YouTube"
+      >
+        <Play className="w-3 h-3 fill-current" />
+        <span>Trailer</span>
+      </a>
+
       {onToggleFavorite && (
         <button
           onClick={(e) => {

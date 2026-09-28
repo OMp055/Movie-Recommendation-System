@@ -89,6 +89,58 @@ export const getSimilarMovies = async (id: string | number): Promise<Movie[]> =>
   return response.data.results;
 };
 
+export const getMovieRecommendations = async (id: string | number): Promise<Movie[]> => {
+  try {
+    const response = await tmdb.get(`/movie/${id}/recommendations`);
+    return response.data.results || [];
+  } catch (error) {
+    console.error('Error fetching TMDB recommendations:', error);
+    return [];
+  }
+};
+
+export const getMovieCandidates = async (movie: MovieDetails | Movie): Promise<Movie[]> => {
+  const movieId = movie.id;
+  const genreIds: number[] = [];
+  if ('genres' in movie && Array.isArray(movie.genres)) {
+    genreIds.push(...movie.genres.map(g => g.id));
+  } else if ('genre_ids' in movie && Array.isArray(movie.genre_ids)) {
+    genreIds.push(...movie.genre_ids);
+  }
+
+  const lang = movie.original_language;
+
+  const [recsRes, simRes, discRes] = await Promise.all([
+    tmdb.get(`/movie/${movieId}/recommendations`).catch(() => ({ data: { results: [] } })),
+    tmdb.get(`/movie/${movieId}/similar`).catch(() => ({ data: { results: [] } })),
+    genreIds.length > 0
+      ? tmdb.get('/discover/movie', {
+          params: {
+            with_genres: genreIds.slice(0, 2).join(','),
+            ...(lang && lang !== 'en' ? { with_original_language: lang } : {}),
+            sort_by: 'popularity.desc',
+            'vote_count.gte': 30,
+          },
+        }).catch(() => ({ data: { results: [] } }))
+      : Promise.resolve({ data: { results: [] } }),
+  ]);
+
+  const pool = new Map<number, Movie>();
+  const combined = [
+    ...(recsRes.data?.results || []),
+    ...(discRes.data?.results || []),
+    ...(simRes.data?.results || []),
+  ];
+
+  for (const m of combined) {
+    if (m.id !== movieId && m.poster_path && (m.vote_count >= 10 || m.popularity >= 5)) {
+      pool.set(m.id, m);
+    }
+  }
+
+  return Array.from(pool.values());
+};
+
 export const getMoviesByGenre = async (genreId: number): Promise<Movie[]> => {
   const response = await tmdb.get('/discover/movie', {
     params: {
@@ -98,18 +150,66 @@ export const getMoviesByGenre = async (genreId: number): Promise<Movie[]> => {
   return response.data.results;
 };
 
-export const fetchAllForRecommendations = async (): Promise<Movie[]> => {
-  // Fetch a few pages of popular and top rated movies to build a local corpus for recommendations
-  const responses = await Promise.all([
-    tmdb.get('/movie/popular?page=1'),
-    tmdb.get('/movie/popular?page=2'),
-    tmdb.get('/movie/top_rated?page=1'),
-    tmdb.get('/movie/top_rated?page=2'),
+export const fetchAllForRecommendations = async (favorites?: Movie[]): Promise<Movie[]> => {
+  const pool = new Map<number, Movie>();
+
+  // If user has favorites, collect candidates directly matching those favorites
+  if (favorites && favorites.length > 0) {
+    const recentFavorites = favorites.slice(-4);
+    const candidatePromises = recentFavorites.map(async fav => {
+      const [recs, sim] = await Promise.all([
+        tmdb.get(`/movie/${fav.id}/recommendations`).catch(() => ({ data: { results: [] } })),
+        tmdb.get(`/movie/${fav.id}/similar`).catch(() => ({ data: { results: [] } })),
+      ]);
+      return [...(recs.data?.results || []), ...(sim.data?.results || [])];
+    });
+
+    // Also discover movies using the user's top genres
+    const genreCount: Record<number, number> = {};
+    recentFavorites.forEach(fav => {
+      fav.genre_ids?.forEach(gid => {
+        genreCount[gid] = (genreCount[gid] || 0) + 1;
+      });
+    });
+    const topGenres = Object.entries(genreCount)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 2)
+      .map(([gid]) => gid)
+      .join(',');
+
+    const discPromise = topGenres
+      ? tmdb.get('/discover/movie', {
+          params: {
+            with_genres: topGenres,
+            sort_by: 'popularity.desc',
+            'vote_count.gte': 50,
+          },
+        }).catch(() => ({ data: { results: [] } }))
+      : Promise.resolve({ data: { results: [] } });
+
+    const [candidateLists, discRes] = await Promise.all([
+      Promise.all(candidatePromises),
+      discPromise,
+    ]);
+
+    for (const m of [...candidateLists.flat(), ...(discRes.data?.results || [])]) {
+      if (m.poster_path && (m.vote_count >= 10 || m.popularity >= 5)) {
+        pool.set(m.id, m);
+      }
+    }
+  }
+
+  // Also include popular and top rated movies for fallback and diversity
+  const [popRes, topRes] = await Promise.all([
+    tmdb.get('/movie/popular?page=1').catch(() => ({ data: { results: [] } })),
+    tmdb.get('/movie/top_rated?page=1').catch(() => ({ data: { results: [] } })),
   ]);
-  
-  const movies = responses.flatMap(res => res.data.results);
-  
-  // Deduplicate
-  const uniqueMovies = Array.from(new Map(movies.map(m => [m.id, m])).values());
-  return uniqueMovies;
+
+  for (const m of [...(popRes.data?.results || []), ...(topRes.data?.results || [])]) {
+    if (m.poster_path) {
+      pool.set(m.id, m);
+    }
+  }
+
+  return Array.from(pool.values());
 };
